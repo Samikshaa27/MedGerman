@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { speak, getSpokenText } from '../lib/speech.js';
 import { loadProgress, addXP, loadXP, calculateLevel } from '../lib/storage.js';
-import { isDevMode } from '../lib/srs.js';
+import { computeMilestone, getSummaryNextReview } from '../lib/milestone.js';
 import words from '../data/words.json';
 
 const EMOJIS = ['🎉', '🌟', '✨', '🏆', '💪', '🔥', '⭐', '🎊', '💯', '🩺'];
@@ -18,6 +18,7 @@ export default function Summary({ results, onPracticeAgain, onHome, audioAvailab
   const pct = total > 0 ? Math.round((correct / total) * 100) : 0;
   const progress = loadProgress();
   const nextReviewText = getSummaryNextReview(progress, words);
+  const milestoneText = computeMilestone(progress, words);
 
   // Award session completion XP once
   const xpAwarded = useRef(false);
@@ -69,6 +70,12 @@ export default function Summary({ results, onPracticeAgain, onHome, audioAvailab
             {p.emoji}
           </span>
         ))}
+      </div>
+
+      {/* Milestone callout — prominent, above the score */}
+      <div className="milestone-callout" data-testid="milestone-line">
+        <span className="milestone-icon">🎯</span>
+        <span className="milestone-text">{milestoneText}</span>
       </div>
 
       <h2 className="summary-title">
@@ -145,61 +152,4 @@ export default function Summary({ results, onPracticeAgain, onHome, audioAvailab
       </div>
     </div>
   );
-}
-
-/**
- * Calculates the next review string from stored progress and due timestamps.
- */
-function getSummaryNextReview(progress, words) {
-  const now = Date.now();
-  let dueNowCount = 0;
-  let minFutureDue = null;
-
-  for (const word of words) {
-    const p = progress[word.id];
-    if (!p || !p.due) continue;
-    if (now >= p.due) {
-      dueNowCount++;
-    } else {
-      if (minFutureDue === null || p.due < minFutureDue) {
-        minFutureDue = p.due;
-      }
-    }
-  }
-
-  if (dueNowCount > 0) {
-    return `Next review: ${dueNowCount} word${dueNowCount !== 1 ? 's' : ''} now`;
-  }
-
-  if (minFutureDue === null) {
-    return 'Practise again to keep the words fresh.';
-  }
-
-  const nextBatchCount =
-    words.filter((w) => {
-      const p = progress[w.id];
-      return p && p.due && Math.abs(p.due - minFutureDue) <= 60000;
-    }).length || 1;
-
-  const diffMs = minFutureDue - now;
-  const diffMins = Math.max(1, Math.round(diffMs / 60000));
-  const diffHours = Math.round(diffMs / 3600000);
-  const diffDays = Math.round(diffMs / 86400000);
-
-  let whenStr = '';
-  if (isDevMode()) {
-    whenStr = diffMins === 1 ? 'in 1 minute (dev)' : `in ${diffMins} minutes (dev)`;
-  } else {
-    if (diffMs < 3600000) {
-      whenStr = `in ${diffMins} min`;
-    } else if (diffMs < 86400000) {
-      whenStr = diffHours === 1 ? 'in 1 hour' : `in ${diffHours} hours`;
-    } else if (diffDays <= 1) {
-      whenStr = 'tomorrow';
-    } else {
-      whenStr = `in ${diffDays} days`;
-    }
-  }
-
-  return `Next review: ${nextBatchCount} word${nextBatchCount !== 1 ? 's' : ''} ${whenStr}`;
 }

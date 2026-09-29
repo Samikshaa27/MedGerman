@@ -667,6 +667,37 @@ body {
   overflow: hidden;
 }
 
+.milestone-callout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: linear-gradient(135deg, var(--sky-100, #e0f2fe), var(--navy-50, #f0f4ff));
+  border: 2px solid var(--sky-500, #0ea5e9);
+  border-radius: 12px;
+  padding: 14px 18px;
+  margin-bottom: 16px;
+  animation: milestone-pop 0.4s ease-out;
+}
+
+.milestone-icon {
+  font-size: 1.4rem;
+  flex-shrink: 0;
+}
+
+.milestone-text {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--navy-900);
+  line-height: 1.35;
+}
+
+@keyframes milestone-pop {
+  0% { transform: scale(0.92); opacity: 0; }
+  60% { transform: scale(1.03); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
 .summary-title {
   font-size: 1.4rem;
   margin-bottom: 20px;
