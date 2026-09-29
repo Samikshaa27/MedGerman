@@ -1,0 +1,182 @@
+[
+  {
+    "letter": "A a",
+    "de": "Arm",
+    "en": "arm",
+    "note": "Short 'ah' like in 'father'."
+  },
+  {
+    "letter": "B b",
+    "de": "Bein",
+    "en": "leg",
+    "note": "Standard 'b', sounds crisp like 'p' at the very end of words."
+  },
+  {
+    "letter": "C c",
+    "de": "Chirurg",
+    "en": "surgeon",
+    "note": "Usually 'ts' before e/i, like 'k' before a/o/u, or soft 'ch'."
+  },
+  {
+    "letter": "D d",
+    "de": "Durchfall",
+    "en": "diarrhea",
+    "note": "Standard 'd', sounds like 't' at the very end of words."
+  },
+  {
+    "letter": "E e",
+    "de": "Erkältung",
+    "en": "cold",
+    "note": "Short 'eh' like in 'bed', or long 'ay' like in 'say'."
+  },
+  {
+    "letter": "F f",
+    "de": "Fieber",
+    "en": "fever",
+    "note": "Always pronounced like 'f' in English."
+  },
+  {
+    "letter": "G g",
+    "de": "Geben",
+    "en": "to give",
+    "note": "Always hard 'g' as in 'get', never soft like in 'gem'."
+  },
+  {
+    "letter": "H h",
+    "de": "Hand",
+    "en": "hand",
+    "note": "Voiced at word start; silent after vowels, stretching the vowel long."
+  },
+  {
+    "letter": "I i",
+    "de": "Infusion",
+    "en": "infusion",
+    "note": "Short 'i' as in 'bit', or long 'ee' as in 'see'."
+  },
+  {
+    "letter": "J j",
+    "de": "Jetzt",
+    "en": "now",
+    "note": "Always sounds like English 'y' in 'yes'."
+  },
+  {
+    "letter": "K k",
+    "de": "Kopf",
+    "en": "head",
+    "note": "Crisp 'k'; always pronounced even before 'n' (like in 'Knie')."
+  },
+  {
+    "letter": "L l",
+    "de": "Lunge",
+    "en": "lung",
+    "note": "Light 'l' made with the tongue tip behind upper front teeth."
+  },
+  {
+    "letter": "M m",
+    "de": "Mund",
+    "en": "mouth",
+    "note": "Always pronounced like 'm' in English."
+  },
+  {
+    "letter": "N n",
+    "de": "Nase",
+    "en": "nose",
+    "note": "Always pronounced like 'n' in English."
+  },
+  {
+    "letter": "O o",
+    "de": "Ohr",
+    "en": "ear",
+    "note": "Pure 'oh' as in 'boat', never gliding into 'w'."
+  },
+  {
+    "letter": "P p",
+    "de": "Pflaster",
+    "en": "plaster / band-aid",
+    "note": "Sharp 'p'; in 'pf', pronounce both 'p' and 'f' together quickly."
+  },
+  {
+    "letter": "Q q",
+    "de": "Quetschung",
+    "en": "contusion / bruise",
+    "note": "Always written with 'u' (qu) and sounds like 'kv'."
+  },
+  {
+    "letter": "R r",
+    "de": "Rücken",
+    "en": "back",
+    "note": "Softly voiced in the back of the throat or gently rolled."
+  },
+  {
+    "letter": "S s",
+    "de": "Schmerz",
+    "en": "pain",
+    "note": "Like 'z' before vowels; 'sh' before 'p' and 't' (like 'Spritze')."
+  },
+  {
+    "letter": "T t",
+    "de": "Tablette",
+    "en": "tablet",
+    "note": "Crisp 't' with a gentle puff of air."
+  },
+  {
+    "letter": "U u",
+    "de": "Untersuchung",
+    "en": "examination",
+    "note": "Sounds like 'oo' in 'boot', never like 'you'."
+  },
+  {
+    "letter": "V v",
+    "de": "Verband",
+    "en": "bandage",
+    "note": "Usually sounds like English 'f' in native words (e.g. 'Verband', 'vier')."
+  },
+  {
+    "letter": "W w",
+    "de": "Wunde",
+    "en": "wound",
+    "note": "Always sounds like English 'v' in 'vine', never 'w' in 'water'."
+  },
+  {
+    "letter": "X x",
+    "de": "X-Ray (Röntgen)",
+    "en": "X-ray",
+    "note": "Pronounced 'ks' like in 'box'."
+  },
+  {
+    "letter": "Y y",
+    "de": "Hygiene",
+    "en": "hygiene",
+    "note": "Sounds like German 'ü' in medical/Greek terms, or 'y' in 'system'."
+  },
+  {
+    "letter": "Z z",
+    "de": "Zimmer",
+    "en": "room",
+    "note": "Always pronounced like 'ts' in English 'cats'."
+  },
+  {
+    "letter": "Ä ä",
+    "de": "Ärztin",
+    "en": "female doctor",
+    "note": "Like 'e' in 'bed', or open like 'ai' in 'air'."
+  },
+  {
+    "letter": "Ö ö",
+    "de": "Öl",
+    "en": "oil",
+    "note": "Round lips as if to say 'oh', but say 'eh'."
+  },
+  {
+    "letter": "Ü ü",
+    "de": "Übelkeit",
+    "en": "nausea",
+    "note": "Round lips as if to whistle, but say 'ee'."
+  },
+  {
+    "letter": "ß",
+    "de": "Fuß",
+    "en": "foot",
+    "note": "Called Eszett; always sharp 'ss' (never voiced like 'z')."
+  }
+]
