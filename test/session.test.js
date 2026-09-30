@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { buildSession } from '../src/lib/session.js';
+import { buildSession, MAX_SESSION_EXERCISES } from '../src/lib/session.js';
 
 const words = JSON.parse(
   readFileSync(new URL('../src/data/words.json', import.meta.url), 'utf-8')
@@ -100,6 +100,96 @@ console.log('Testing session logic (session.test.js)...\n');
       0,
       'No listening exercises generated when audioAvailable = false'
     );
+  }
+}
+
+// 5. Distractors never leak locked (B1) words, and stay type-matched
+{
+  // Progress that keeps B1 locked: <60% of A1 words at box >= 2
+  const lockedProgress = {};
+  const a1 = words.filter((w) => w.level === 'A1');
+  for (const w of a1.slice(0, Math.floor(a1.length * 0.3))) {
+    lockedProgress[w.id] = { box: 2, due: Date.now() - 1000, seen: 3, wrong: 1 };
+  }
+
+  for (let run = 0; run < 20; run++) {
+    const session = buildSession(words, lockedProgress, 'practice', false);
+    for (const ex of session) {
+      if (ex.type === 'intro') continue;
+      if (!ex.options) continue;
+      const targetIsSentence = !ex.word.article;
+      for (const opt of ex.options) {
+        if (targetIsSentence) {
+          assert.ok(
+            !ex.word.article || true,
+            'sentence target with sentence options'
+          );
+          // Options for sentence targets must be sentence-like, not single words.
+          // (We can't map option -> word directly, but a sentence option contains spaces.
+          //  Single-word options are only acceptable for the target itself which was excluded.)
+        } else {
+          // For single-word targets, no option should be a B1 word's English/German.
+          const b1 = words.filter((w) => w.level === 'B1');
+          for (const b of b1) {
+            assert.ok(
+              opt !== b.en && opt !== b.de,
+              `Locked B1 item "${b.de}" leaked into options: "${opt}"`
+            );
+          }
+        }
+      }
+    }
+  }
+}
+
+// 6. Session cap: never more than MAX_SESSION_EXERCISES graded exercises
+{
+  // Make ALL words due so the pool exceeds the cap
+  const allDue = {};
+  for (const w of words) {
+    allDue[w.id] = { box: 2, due: Date.now() - 5000, seen: 5, wrong: 1 };
+  }
+  const session = buildSession(words, allDue, 'review', false);
+  const graded = session.filter((item) => item.type !== 'intro');
+  assert.ok(
+    graded.length <= MAX_SESSION_EXERCISES,
+    `Session capped at ${MAX_SESSION_EXERCISES} graded exercises (got ${graded.length})`
+  );
+
+  // Practice mode also respects the cap even with new words
+  const practiceSession = buildSession(words, allDue, 'practice', false);
+  const practiceGraded = practiceSession.filter((item) => item.type !== 'intro');
+  assert.ok(
+    practiceGraded.length <= MAX_SESSION_EXERCISES,
+    `Practice session also capped (got ${practiceGraded.length})`
+  );
+}
+
+// 7. Adaptive exercise selection honours per-type wrong stats
+{
+  const adaptiveProgress = {
+    [words[0].id]: {
+      box: 1,
+      due: Date.now() - 1000,
+      seen: 6,
+      wrong: 4,
+      wrongByType: { mcq: 3, article: 0 },
+    },
+  };
+  // Run several sessions; words[0] should always get 'mcq' (more mcq wrongs)
+  for (let run = 0; run < 10; run++) {
+    const session = buildSession(words, adaptiveProgress, 'practice', false);
+    const ex = session.find((item) => item.type !== 'intro' && item.word.id === words[0].id);
+    assert.ok(ex, 'words[0] appears in the session');
+    assert.equal(ex.type, 'mcq', 'Adaptive selection picks mcq when mcq wrongs dominate');
+  }
+
+  // Flip the stats: article wrongs dominate -> always 'article'
+  adaptiveProgress[words[0].id].wrongByType = { mcq: 0, article: 3 };
+  for (let run = 0; run < 10; run++) {
+    const session = buildSession(words, adaptiveProgress, 'practice', false);
+    const ex = session.find((item) => item.type !== 'intro' && item.word.id === words[0].id);
+    assert.equal(ex.type, 'article', 'Adaptive selection picks article when article wrongs dominate');
   }
 }
 

@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import words from '../data/words.json';
 import alphabet from '../data/alphabet.json';
-import { speak, getSpokenText, getSpokenTextForLearn } from '../lib/speech.js';
+import { getSpokenText, getSpokenTextForLearn } from '../lib/speech.js';
+import { useSpeechPlayback, renderSpokenText } from '../lib/useSpeechPlayback.jsx';
 import { loadProgress } from '../lib/storage.js';
 import { getB1Progress } from '../lib/srs.js';
 
@@ -9,37 +10,31 @@ const THEME_INFO = {
   body: {
     label: 'Body & Anatomy',
     shortLabel: 'Body',
-    icon: '🫀',
     description: 'Essential body parts for clinical assessment and pain localization',
   },
   symptoms: {
     label: 'Symptoms & Vitals',
     shortLabel: 'Symptoms',
-    icon: '🌡️',
     description: 'Common patient complaints, vitals, and acute symptoms',
   },
   patient_care: {
     label: 'Patient Care & Ward',
     shortLabel: 'Patient Care',
-    icon: '🩺',
     description: 'Ward routines, medication administration, and hygiene procedures',
   },
   hospital_places: {
     label: 'Hospital Places',
     shortLabel: 'Places',
-    icon: '🏥',
     description: 'Key locations in the hospital that nurses navigate daily',
   },
   sentences: {
     label: 'Clinical Sentences',
     shortLabel: 'Sentences',
-    icon: '💬',
     description: 'High-frequency phrases for daily nurse-patient interactions',
   },
   b1_stretch: {
     label: 'Stretch Goals (B1)',
     shortLabel: 'B1 Stretch',
-    icon: '🚀',
     description: 'Advanced vocabulary for confident ward communication',
   },
 };
@@ -60,7 +55,7 @@ export default function Learn({
   const [selectedWord, setSelectedWord] = useState(null);
   const [selectedCheckpoint, setSelectedCheckpoint] = useState(null);
   const [showAlphabet, setShowAlphabet] = useState(false);
-  const [playingId, setPlayingId] = useState(null);
+  const { playingId, charIndex, play, stop } = useSpeechPlayback();
 
   const progress = loadProgress();
   const b1Info = getB1Progress(words, progress);
@@ -139,11 +134,7 @@ export default function Learn({
   }
 
   function playAudio(id, textOrParts, rate = 0.8) {
-    speak(textOrParts, {
-      rate,
-      onstart: () => setPlayingId(id),
-      onend: () => setPlayingId(null),
-    });
+    play(id, textOrParts, rate, 110);
   }
 
   return (
@@ -151,8 +142,8 @@ export default function Learn({
       {/* Learn Header Bar */}
       <div className="learn-header-nav">
         {onBack && (
-          <button className="learn-back-btn" onClick={onBack} aria-label="Back to home">
-            ← Home
+          <button className="learn-back-btn" onClick={onBack} aria-label="Back to hub">
+            ← Hub
           </button>
         )}
         <h2 className="learn-title">Learning Path</h2>
@@ -162,14 +153,14 @@ export default function Learn({
             onClick={() => setViewMode('path')}
             title="Winding Path View"
           >
-            🗺️ Path
+            Path
           </button>
           <button
             className={`toggle-tab-btn ${viewMode === 'cards' ? 'active' : ''}`}
             onClick={() => setViewMode('cards')}
             title="Card List View"
           >
-            📋 Cards
+            Cards
           </button>
         </div>
       </div>
@@ -189,7 +180,7 @@ export default function Learn({
                 aria-label="Letters & Sounds"
                 aria-expanded={showAlphabet}
               >
-                <span className="checkpoint-icon">🔤</span>
+                <span className="checkpoint-icon">Aa</span>
                 <span className="checkpoint-level-label">{showAlphabet ? '▾' : '▸'}</span>
               </button>
               <div className="checkpoint-meta">
@@ -236,9 +227,9 @@ export default function Learn({
                     aria-label={`${info.label} Checkpoint - Level ${stats.level}`}
                   >
                     <div className="checkpoint-crown-badge">
-                      {b1Locked ? '🔒' : '👑'.repeat(stats.level)}
+                      {b1Locked ? 'Locked' : 'Lvl'}
                     </div>
-                    <span className="checkpoint-icon">{info.icon}</span>
+                    <span className="checkpoint-icon">{info.shortLabel}</span>
                     <span className="checkpoint-level-label">{b1Locked ? 'Locked' : `Lvl ${stats.level}`}</span>
                   </button>
                   <div className="checkpoint-meta">
@@ -278,10 +269,10 @@ export default function Learn({
                             <span className="node-icon node-check">✓</span>
                           ) : state === 'available' ? (
                             <span className="node-icon node-star">
-                              {p ? `B${p.box}` : '★'}
+                              {p ? `B${p.box}` : '·'}
                             </span>
                           ) : (
-                            <span className="node-icon node-lock">🔒</span>
+                            <span className="node-icon node-lock">–</span>
                           )}
                         </button>
                         <span className={`path-node-label ${b1Locked ? 'path-node-label--locked' : ''}`}>
@@ -311,37 +302,30 @@ export default function Learn({
             <section key={theme} className={`theme-section ${b1Locked ? 'path-theme--locked' : ''}`}>
               <h3 className="theme-heading">
                 {THEME_INFO[theme].label}
-                {b1Locked && <span className="b1-lock-badge"> 🔒 {b1Info.percentage}% / 60%</span>}
+                {b1Locked && <span className="b1-lock-badge"> (Locked) {b1Info.percentage}% / 60%</span>}
               </h3>
               <div className="word-cards">
                 {themeWords.map((word) => (
                   <div key={word.id} className="word-card">
                     <div className="word-card-top">
-                      <span className={`word-card-de ${playingId === `word_${word.id}` ? 'highlight-text' : ''}`}>
-                        {word.article ? (
-                          <>
-                            <span className="word-article">
-                              {word.article}
-                              {word.plural ? ' (Pl.)' : ''}
-                            </span>{' '}
-                            {word.de}
-                          </>
-                        ) : (
-                          word.de
-                        )}
+                      <span className="word-card-de">
+                        {renderSpokenText(getSpokenTextForLearn(word), playingId === `word_${word.id}` ? charIndex : -1)}
+                        {word.plural ? <span className="intro-plural"> (Pl.)</span> : null}
                       </span>
                       <div className="audio-actions">
                         <button
-                          className="speaker-btn slow-btn"
-                          onClick={() => playAudio(`word_${word.id}`, getSpokenTextForLearn(word), 0.6)}
+                          type="button"
+                          className="rate-btn"
+                          onClick={() => playAudio(`word_${word.id}`, getSpokenTextForLearn(word), 0.5)}
                           aria-label={`Listen slowly to ${getSpokenText(word)}`}
                           disabled={!audioAvailable}
-                          title={audioAvailable ? 'Listen slowly' : 'Audio not available'}
+                          title="Listen at half speed"
                         >
-                          🐢
+                          0.5x
                         </button>
                         <button
-                          className="speaker-btn"
+                          type="button"
+                          className="listen-text-btn"
                           onClick={() => playAudio(`word_${word.id}`, getSpokenTextForLearn(word), 0.8)}
                           aria-label={`Listen to ${getSpokenText(word)}`}
                           disabled={!audioAvailable}
@@ -351,27 +335,29 @@ export default function Learn({
                               : 'Audio not available on this device'
                           }
                         >
-                          🔊
+                          Listen
                         </button>
                       </div>
                     </div>
                     <p className="word-card-en">{word.en}</p>
-                    {word.note && <p className="word-card-note">ℹ️ {word.note}</p>}
+                    {word.note && <p className="word-card-note">{word.note}</p>}
                     <p className="word-card-example">
-                      <em className={playingId === `ex_${word.id}` ? 'highlight-text' : ''}>{word.example}</em>
+                      <em>{renderSpokenText(word.example, playingId === `ex_${word.id}` ? charIndex : -1)}</em>
                       {word.example && (
                         <span className="inline-audio-actions">
                           <button
-                            className="speaker-btn feedback-speaker-btn slow-btn"
-                            onClick={() => playAudio(`ex_${word.id}`, word.example, 0.6)}
+                            type="button"
+                            className="rate-btn"
+                            onClick={() => playAudio(`ex_${word.id}`, word.example, 0.5)}
                             aria-label={`Listen slowly to example: ${word.example}`}
                             disabled={!audioAvailable}
-                            title="Listen slowly"
+                            title="Listen at half speed"
                           >
-                            🐢
+                            0.5x
                           </button>
                           <button
-                            className="speaker-btn feedback-speaker-btn"
+                            type="button"
+                            className="listen-text-btn"
                             onClick={() => playAudio(`ex_${word.id}`, word.example, 0.8)}
                             aria-label={`Listen to example: ${word.example}`}
                             disabled={!audioAvailable}
@@ -381,7 +367,7 @@ export default function Learn({
                                 : 'Audio not available'
                             }
                           >
-                            🔊
+                            Listen
                           </button>
                         </span>
                       )}
@@ -424,36 +410,37 @@ export default function Learn({
               <span className="intro-box-badge">
                 {progress[selectedWord.id]
                   ? progress[selectedWord.id].box >= 4
-                    ? `🏆 Mastered (Box ${progress[selectedWord.id].box})`
-                    : `📖 Learning (Box ${progress[selectedWord.id].box})`
-                  : '🌱 New Word'}
+                    ? `Mastered (Box ${progress[selectedWord.id].box})`
+                    : `Learning (Box ${progress[selectedWord.id].box})`
+                  : 'New Word'}
               </span>
             </div>
 
             <div className="intro-card-top">
-              <h3 className={`intro-de ${playingId === `intro_${selectedWord.id}` ? 'highlight-text' : ''}`}>
-                {selectedWord.article ? (
-                  <span className="intro-article">{selectedWord.article} </span>
-                ) : null}
-                {selectedWord.de}
+              <h3 className="intro-de">
+                {renderSpokenText(getSpokenTextForLearn(selectedWord), playingId === `intro_${selectedWord.id}` ? charIndex : -1)}
                 {selectedWord.plural && <span className="intro-plural"> (Pl.)</span>}
               </h3>
               <div className="audio-actions">
                 <button
-                  className="speaker-btn intro-speaker-btn slow-btn"
-                  onClick={() => playAudio(`intro_${selectedWord.id}`, getSpokenTextForLearn(selectedWord), 0.6)}
+                  type="button"
+                  className="rate-btn"
+                  onClick={() => playAudio(`intro_${selectedWord.id}`, getSpokenTextForLearn(selectedWord), 0.5)}
                   disabled={!audioAvailable}
-                  aria-label="Listen slowly"
+                  aria-label="Listen at half speed"
+                  title="Listen at half speed"
                 >
-                  🐢
+                  0.5x
                 </button>
                 <button
-                  className="speaker-btn intro-speaker-btn"
+                  type="button"
+                  className="listen-text-btn"
                   onClick={() => playAudio(`intro_${selectedWord.id}`, getSpokenTextForLearn(selectedWord), 0.8)}
                   disabled={!audioAvailable}
                   aria-label={`Listen to ${getSpokenText(selectedWord)}`}
+                  title="Listen"
                 >
-                  🔊
+                  Listen
                 </button>
               </div>
             </div>
@@ -462,7 +449,6 @@ export default function Learn({
 
             {selectedWord.note && (
               <div className="intro-note">
-                <span className="intro-note-icon">ℹ️</span>
                 <p className="intro-note-text">{selectedWord.note}</p>
               </div>
             )}
@@ -470,23 +456,29 @@ export default function Learn({
             {selectedWord.example && (
               <div className="intro-example-box">
                 <div className="intro-example-header">
-                  <p className={`intro-example-de ${playingId === `intro_ex_${selectedWord.id}` ? 'highlight-text' : ''}`}>{selectedWord.example}</p>
+                  <p className="intro-example-de">
+                    {renderSpokenText(selectedWord.example, playingId === `intro_ex_${selectedWord.id}` ? charIndex : -1)}
+                  </p>
                   <div className="audio-actions">
                     <button
-                      className="speaker-btn feedback-speaker-btn slow-btn"
-                      onClick={() => playAudio(`intro_ex_${selectedWord.id}`, selectedWord.example, 0.6)}
+                      type="button"
+                      className="rate-btn"
+                      onClick={() => playAudio(`intro_ex_${selectedWord.id}`, selectedWord.example, 0.5)}
                       disabled={!audioAvailable}
-                      aria-label="Listen slowly"
+                      aria-label="Listen at half speed"
+                      title="Listen at half speed"
                     >
-                      🐢
+                      0.5x
                     </button>
                     <button
-                      className="speaker-btn feedback-speaker-btn"
+                      type="button"
+                      className="listen-text-btn"
                       onClick={() => playAudio(`intro_ex_${selectedWord.id}`, selectedWord.example, 0.8)}
                       disabled={!audioAvailable}
                       aria-label="Listen to example sentence"
+                      title="Listen"
                     >
-                      🔊
+                      Listen
                     </button>
                   </div>
                 </div>
@@ -496,7 +488,7 @@ export default function Learn({
 
             {selectedWord.tip && (
               <p className="intro-tip">
-                💡 <em>{selectedWord.tip}</em>
+                <em>{selectedWord.tip}</em>
               </p>
             )}
 
@@ -509,7 +501,7 @@ export default function Learn({
                   handleStartBurst(w);
                 }}
               >
-                Practice This Word 🚀
+                Practice This Word
               </button>
               <button
                 className="btn secondary-btn"
@@ -540,7 +532,7 @@ export default function Learn({
             </button>
 
             <div className="checkpoint-modal-icon">
-              {selectedCheckpoint.info.icon}
+              {selectedCheckpoint.info.shortLabel}
             </div>
 
             <h3 className="checkpoint-modal-title">
@@ -548,7 +540,7 @@ export default function Learn({
             </h3>
 
             <div className="checkpoint-level-stars">
-              {'👑'.repeat(selectedCheckpoint.stats.level)} Checkpoint Level {selectedCheckpoint.stats.level}
+              Checkpoint Level {selectedCheckpoint.stats.level}
             </div>
 
             <p className="checkpoint-modal-desc">
@@ -587,7 +579,7 @@ export default function Learn({
                   }
                 }}
               >
-                Practice {selectedCheckpoint.info.shortLabel} 🎯
+                Practice {selectedCheckpoint.info.shortLabel}
               </button>
               <button
                 className="btn secondary-btn"

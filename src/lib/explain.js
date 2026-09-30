@@ -351,6 +351,22 @@ export function buildExplanation(mistake, words = []) {
 let aiCallCount = 0;
 const MAX_AI_CALLS = 20;
 
+/**
+ * Cache of AI explanations keyed by a stable mistake signature, so asking
+ * about the same mistake twice (e.g. re-queued word answered wrong again)
+ * reuses the first explanation instead of spending another API call.
+ */
+const aiExplanationCache = new Map();
+
+function mistakeCacheKey(mistake) {
+  return [
+    mistake.exerciseType || '',
+    mistake.german || '',
+    mistake.userAnswer || '',
+    mistake.correctAnswer || '',
+  ].join('|');
+}
+
 const COMMON_EN_CAPS = new Set([
   'I', 'You', 'He', 'She', 'It', 'We', 'They', 'The', 'A', 'An', 'This', 'That',
   'Here', 'There', 'In', 'On', 'At', 'To', 'For', 'With', 'By', 'From', 'Of',
@@ -368,6 +384,13 @@ const COMMON_EN_CAPS = new Set([
  * German words or exceeds the session quota.
  */
 export async function fetchAIExplanation(mistake, words = []) {
+  if (!mistake) return null;
+
+  const cacheKey = mistakeCacheKey(mistake);
+  if (aiExplanationCache.has(cacheKey)) {
+    return aiExplanationCache.get(cacheKey);
+  }
+
   if (aiCallCount >= MAX_AI_CALLS) {
     return null;
   }
@@ -482,8 +505,9 @@ export async function fetchAIExplanation(mistake, words = []) {
     
     // Simple sentence split:
     const aiLines = explanation.match(/[^.!?]+[.!?]+/g) || [explanation];
-    
-    return { isAi: true, lines: aiLines.map(l => l.trim()), hint: '' };
+    const result = { isAi: true, lines: aiLines.map((l) => l.trim()), hint: '' };
+    aiExplanationCache.set(cacheKey, result);
+    return result;
   } catch (e) {
     return null;
   }

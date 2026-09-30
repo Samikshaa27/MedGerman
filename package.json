@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node test/explain.test.js && node test/srs.test.js && node test/session.test.js && node test/milestone.test.js"
+    "test": "node test/explain.test.js && node test/srs.test.js && node test/session.test.js && node test/storage.test.js && node test/milestone.test.js"
   },
   "dependencies": {
     "react": "^18.3.1",

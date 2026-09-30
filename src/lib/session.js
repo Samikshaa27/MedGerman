@@ -14,16 +14,32 @@ function shuffle(arr) {
 }
 
 /**
+ * Maximum number of graded exercises in one session.
+ * Keeps practice short enough to fit between clinical shifts;
+ * leftover due words simply remain due for the next session.
+ */
+export const MAX_SESSION_EXERCISES = 15;
+
+/**
  * Pick `count` distractor words, preferring the same theme.
  * Excludes the target word itself.
+ *
+ * Candidates are drawn from `pool` — the same unlocked word set the session
+ * was built from — so locked (e.g. B1) items never leak into answer options.
+ * Single-word targets only get single-word distractors and sentence targets
+ * only get sentence distractors, so options stay length-matched and the
+ * correct answer is never trivially identifiable by its length.
  */
-function getDistractors(word, words, count = 3) {
-  const sameTheme = shuffle(
-    words.filter((w) => w.theme === word.theme && w.id !== word.id)
-  );
-  const otherTheme = shuffle(
-    words.filter((w) => w.theme !== word.theme && w.id !== word.id)
-  );
+function getDistractors(word, pool, count = 3) {
+  const targetIsSentence = !word.article; // single words have articles, sentences don't
+  let candidates = pool.filter((w) => w.id !== word.id);
+
+  candidates = targetIsSentence
+    ? candidates.filter((w) => !w.article)
+    : candidates.filter((w) => Boolean(w.article));
+
+  const sameTheme = shuffle(candidates.filter((w) => w.theme === word.theme));
+  const otherTheme = shuffle(candidates.filter((w) => w.theme !== word.theme));
   return [...sameTheme, ...otherTheme].slice(0, count);
 }
 
@@ -35,10 +51,24 @@ function getDistractors(word, words, count = 3) {
  *          Sentence items get "listening" (or "sentence" typing if no audio).
  *          If audio is unavailable, listening is skipped in favor of cloze / article / mcq / typing.
  * Box 4-5: "typing" (type the German word) or "sentence" (for A2 sentence items)
+ *
+ * @param {object} progress - SRS progress map, may include per-word `wrongByType` stats
  */
-function pickExerciseType(word, box, audioAvailable = hasGermanVoice()) {
+function pickExerciseType(word, box, audioAvailable = hasGermanVoice(), progress = {}) {
+  const stats = progress[word.id];
+  const wrongByType = stats && stats.wrongByType ? stats.wrongByType : null;
+
   if (box <= 1) {
     if (word.article) {
+      // Adaptive: bias toward the exercise type the learner gets wrong most,
+      // falling back to a coin flip when there's no signal yet.
+      if (wrongByType) {
+        const wMcq = wrongByType.mcq || 0;
+        const wArticle = wrongByType.article || 0;
+        if (wMcq !== wArticle) {
+          return wMcq > wArticle ? 'mcq' : 'article';
+        }
+      }
       return Math.random() < 0.5 ? 'mcq' : 'article';
     }
     return 'mcq';
@@ -52,6 +82,13 @@ function pickExerciseType(word, box, audioAvailable = hasGermanVoice()) {
     if (word.theme === 'sentences') {
       return 'listening';
     }
+    if (wrongByType) {
+      const wListen = wrongByType.listening || 0;
+      const wCloze = wrongByType.cloze || 0;
+      if (wListen !== wCloze) {
+        return wListen > wCloze ? 'listening' : 'cloze';
+      }
+    }
     return Math.random() < 0.5 ? 'listening' : 'cloze';
   } else {
     if (word.theme === 'sentences') {
@@ -64,13 +101,13 @@ function pickExerciseType(word, box, audioAvailable = hasGermanVoice()) {
 /**
  * Build a single exercise object for a word.
  */
-function buildExercise(word, type, words) {
+function buildExercise(word, type, pool) {
   const exercise = { word, type };
 
   switch (type) {
     case 'mcq': {
       // Show German word/sentence, pick the correct English meaning
-      const distractors = getDistractors(word, words);
+      const distractors = getDistractors(word, pool);
       exercise.options = shuffle([word.en, ...distractors.map((d) => d.en)]);
       exercise.correct = word.en;
       break;
@@ -83,7 +120,7 @@ function buildExercise(word, type, words) {
     }
     case 'listening': {
       // Hear the German word, pick the correct English meaning
-      const distractors = getDistractors(word, words);
+      const distractors = getDistractors(word, pool);
       exercise.options = shuffle([word.en, ...distractors.map((d) => d.en)]);
       exercise.correct = word.en;
       break;
@@ -92,7 +129,7 @@ function buildExercise(word, type, words) {
       // Blank the German word in its example sentence, pick the correct fill
       exercise.sentence = word.example.replace(word.de, '______');
       exercise.correct = word.de;
-      const distractors = getDistractors(word, words);
+      const distractors = getDistractors(word, pool);
       exercise.options = shuffle([word.de, ...distractors.map((d) => d.de)]);
       break;
     }
@@ -150,11 +187,12 @@ export function buildSession(words, progress, mode, audioAvailable = hasGermanVo
       ...dueWords.map((d) => d.word),
       ...newWords.slice(0, 5),
     ];
-  }
-
-  // Build an exercise queue (inserting an intro step before each word with no progress entry)
+  }  // Build an exercise queue (inserting an intro step before each word with no progress entry)
   const exercises = [];
   for (const word of sessionWords) {
+    if (exercises.filter((item) => item.type !== 'intro').length >= MAX_SESSION_EXERCISES) {
+      break; // session cap reached; remaining due words stay due for next time
+    }
     const p = progress[word.id];
     if (!p) {
       exercises.push({
@@ -164,9 +202,29 @@ export function buildSession(words, progress, mode, audioAvailable = hasGermanVo
       });
     }
     const box = p ? p.box : 0;
-    const type = pickExerciseType(word, box, audioAvailable);
-    exercises.push(buildExercise(word, type, words));
+    const type = pickExerciseType(word, box, audioAvailable, progress);
+    exercises.push(buildExercise(word, type, pool));
   }
 
   return exercises;
+}
+
+/**
+ * Build one random exercise for a single word (used by Daily Challenges, Test
+ * and level fallback sessions). Picks the exercise type uniformly from the
+ * types that word supports (article only for words with articles, sentence
+ * typing only for sentences); "listening" is excluded when audio is
+ * unavailable so every generated question stays answerable.
+ */
+export function buildSingleExercise(word, pool, audioAvailable = hasGermanVoice()) {
+  const isSentence = !word.article;
+  const types = isSentence
+    ? audioAvailable
+      ? ['mcq', 'listening', 'sentence']
+      : ['mcq', 'sentence']
+    : audioAvailable
+      ? ['mcq', 'article', 'listening', 'cloze', 'typing']
+      : ['mcq', 'article', 'cloze', 'typing'];
+  const type = types[Math.floor(Math.random() * types.length)];
+  return buildExercise(word, type, pool);
 }

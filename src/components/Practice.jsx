@@ -1,18 +1,39 @@
-import { useState, useCallback } from 'react';
-import { speak, getSpokenText, getSpokenTextForLearn } from '../lib/speech.js';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import {
+  speak,
+  getSpokenText,
+  getSpokenTextForLearn,
+  isPronunciationMatch,
+} from '../lib/speech.js';
+import { useSpeechPlayback, renderSpokenText } from '../lib/useSpeechPlayback.jsx';
 import { grade, getReencounterText } from '../lib/srs.js';
-import { loadProgress, saveProgress, defaultProgress, addXP } from '../lib/storage.js';
+import { loadProgress, saveProgress, defaultProgress, addXP, addDailyXP } from '../lib/storage.js';
 import { buildExplanation, evaluateAnswer, fetchAIExplanation } from '../lib/explain.js';
 import { playCorrectSound, playIncorrectSound } from '../lib/sound.js';
 import words from '../data/words.json';
+import { markWordCompleted } from '../lib/storage.js';
 
 /**
  * Practice component: renders one exercise at a time from a session queue.
  * Props:
- *   session   – initial array of exercise objects from buildSession()
- *   onFinish  – callback when all exercises are done, receives { correct, total, missed }
+ *   session      – initial array of exercise objects from buildSession()
+ *   onFinish     – callback when all exercises are done, receives { correct, total, missed }
+ *   variant      – 'practice' (full loop: explanations + re-queue) | 'quiz' (no explanations, no re-queue)
+ *   answeredIds  – exercise indexes already answered (skip guard for non-advancing quiz variants)
+ *   progressMeta – { levelId } when the session records level completion on correct answers
+ *   onSkip       – exit callback rendered as “Leave” (used by timed Test sessions)
  */
-export default function Practice({ session, onFinish, audioAvailable = true }) {
+export default function Practice({
+  session,
+  onFinish,
+  audioAvailable = true,
+  variant = 'practice',
+  progressMeta = null,
+  onSkip = null,
+  answeredIds = null,
+  onAnswered = null,
+  expired = false,
+}) {
   const [queue, setQueue] = useState(session);
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState(null);
@@ -74,6 +95,7 @@ export default function Practice({ session, onFinish, audioAvailable = true }) {
   }
 
   function submitAnswer(correct, ans) {
+    if (answeredIds && answeredIds.includes(index)) return; // already answered in quiz mode
     setAnswered(true);
     setIsCorrect(correct);
 
@@ -82,6 +104,7 @@ export default function Practice({ session, onFinish, audioAvailable = true }) {
       const bonus = softNote ? 2 : 0;
       const gained = 10 + bonus;
       addXP(gained);
+      addDailyXP(gained);
       setXpToast({ text: bonus > 0 ? `+${gained} XP (typing bonus!)` : `+${gained} XP`, id: Date.now() });
       setMistake(null);
     } else {
@@ -101,29 +124,44 @@ export default function Practice({ session, onFinish, audioAvailable = true }) {
       setMistake(mistakeData);
     }
 
-    // Update SRS progress
+    // Update SRS progress (with per-exercise-type stats for adaptive selection)
     const progress = loadProgress();
     const wordId = current.word.id;
     const prev = progress[wordId] || defaultProgress();
-    progress[wordId] = grade(prev, correct);
+    progress[wordId] = grade(prev, correct, current.type);
     saveProgress(progress);
 
-    // Track results
-    setResults((prev) => {
-      const next = {
-        correct: prev.correct + (correct ? 1 : 0),
-        total: prev.total + 1,
-        missed: correct
-          ? prev.missed
-          : [...prev.missed, current.word],
-      };
-      return next;
-    });
+    // Level completion (Tab 3) is recorded separately from SRS boxes:
+    // one correct pass marks the item as "done" for that level.
+    if (progressMeta && progressMeta.levelId && correct) {
+      markWordCompleted(progressMeta.levelId, wordId);
+    }
 
-    // Re-queue wrong answers at the end
-    if (!correct) {
+    // Track results (submitAnswer runs once per exercise, so plain state is safe)
+    const next = {
+      correct: results.correct + (correct ? 1 : 0),
+      total: results.total + 1,
+      missed: correct ? results.missed : [...results.missed, current.word],
+    };
+    setResults(next);
+    if (onAnswered) onAnswered(index, next);
+
+    // Re-queue wrong answers at the end (full practice loop only)
+    if (!correct && variant !== 'quiz') {
       setQueue((prev) => [...prev, current]);
     }
+  }
+
+  function resetExerciseState() {
+    setSelected(null);
+    setTyped('');
+    setAnswered(false);
+    setIsCorrect(false);
+    setSoftNote(null);
+    setMistake(null);
+    setExplanationData(null);
+    setIsExplaining(false);
+    setXpToast(null);
   }
 
   function handleIntroGotIt() {
@@ -133,15 +171,7 @@ export default function Practice({ session, onFinish, audioAvailable = true }) {
       return;
     }
     setIndex(nextIndex);
-    setSelected(null);
-    setTyped('');
-    setAnswered(false);
-    setIsCorrect(false);
-    setSoftNote(null);
-    setMistake(null);
-    setExplanationData(null);
-    setIsExplaining(false);
-    setXpToast(null);
+    resetExerciseState();
   }
 
   function handleNext() {
@@ -151,15 +181,18 @@ export default function Practice({ session, onFinish, audioAvailable = true }) {
       return;
     }
     setIndex(nextIndex);
-    setSelected(null);
-    setTyped('');
-    setAnswered(false);
-    setIsCorrect(false);
-    setSoftNote(null);
-    setMistake(null);
-    setExplanationData(null);
-    setIsExplaining(false);
-    setXpToast(null);
+    resetExerciseState();
+  }
+
+  /** Restart the whole session from the beginning with the same exercises. */
+  function handleRestart() {
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    setQueue(session);
+    setIndex(0);
+    setResults({ correct: 0, total: 0, missed: [] });
+    resetExerciseState();
   }
 
   function playAudio(id, textOrParts, rate = 0.85) {
@@ -172,6 +205,15 @@ export default function Practice({ session, onFinish, audioAvailable = true }) {
 
   if (!current) return null;
 
+  // Timed test: time is up — finish immediately with what was answered so far.
+  // (Kept before rendering so an expired session never shows another question.)
+  useEffect(() => {
+    if (expired) {
+      onFinish(results);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expired]);
+
   const totalGraded = queue.filter((item) => item.type !== 'intro').length;
   const currentGradedIndex = queue.slice(0, index).filter((item) => item.type !== 'intro').length;
   const progressPct = totalGraded > 0 ? Math.round((currentGradedIndex / totalGraded) * 100) : 0;
@@ -180,95 +222,21 @@ export default function Practice({ session, onFinish, audioAvailable = true }) {
     ? `${word.article}${word.plural ? ' (Pl.)' : ''} ${word.de}`
     : word.de;
 
-  // Intro step card
+  // Attempt number for the current exercise within this session
+  // (re-queued wrong answers count as additional attempts)
+  const attemptNo =
+    queue.slice(0, index + 1).filter((q) => q.word.id === word.id && q.type === current.type)
+      .length || 1;
+
+  // New-word intro: full-screen pronunciation screen
   if (current.type === 'intro') {
     return (
-      <div className="practice">
-        <div className="progress-bar">
-          <div className="progress-fill" style={{ width: `${progressPct}%` }} />
-        </div>
-        <p className="progress-text">
-          New word preview ({currentGradedIndex} / {totalGraded})
-        </p>
-
-        <div className="intro-card question-card">
-          <div className="intro-badge">✨ New Word</div>
-          <div className="intro-word-row">
-            <h2 className={`intro-german ${playingId === `intro_${word.id}` ? 'highlight-text' : ''}`}>
-              {word.article ? (
-                <>
-                  <span className="intro-article">{word.article}</span> {word.de}
-                  {word.plural ? ' (Pl.)' : ''}
-                </>
-              ) : (
-                word.de
-              )}
-            </h2>
-            {audioAvailable && (
-              <div className="audio-actions">
-                <button
-                  type="button"
-                  className="speaker-btn intro-speaker-btn slow-btn"
-                  onClick={() => playAudio(`intro_${word.id}`, getSpokenTextForLearn(word), 0.6)}
-                  aria-label="Listen slowly"
-                >
-                  🐢
-                </button>
-                <button
-                  type="button"
-                  className="speaker-btn intro-speaker-btn"
-                  onClick={() => playAudio(`intro_${word.id}`, getSpokenTextForLearn(word), 0.8)}
-                  aria-label={`Listen to ${getSpokenText(word)}`}
-                >
-                  🔊
-                </button>
-              </div>
-            )}
-          </div>
-          <p className="intro-en">{word.en}</p>
-
-          <div className="intro-example-box">
-            <p className="intro-example">
-              <em className={playingId === `intro_ex_${word.id}` ? 'highlight-text' : ''}>{word.example}</em>
-              {audioAvailable && word.example && (
-                <span className="inline-audio-actions">
-                  <button
-                    type="button"
-                    className="speaker-btn feedback-speaker-btn slow-btn"
-                    onClick={() => playAudio(`intro_ex_${word.id}`, word.example, 0.6)}
-                    aria-label="Listen slowly"
-                  >
-                    🐢
-                  </button>
-                  <button
-                    type="button"
-                    className="speaker-btn feedback-speaker-btn"
-                    onClick={() => playAudio(`intro_ex_${word.id}`, word.example, 0.8)}
-                    aria-label={`Listen to ${word.example}`}
-                  >
-                    🔊
-                  </button>
-                </span>
-              )}
-            </p>
-            <p className="intro-example-en">{word.exampleEn}</p>
-          </div>
-
-          {word.note && (
-            <div className="intro-note">
-              ℹ️ {word.note}
-            </div>
-          )}
-
-          <button
-            type="button"
-            className="btn primary-btn intro-got-it-btn"
-            onClick={handleIntroGotIt}
-          >
-            Got it →
-          </button>
-        </div>
-      </div>
+      <IntroFullScreen
+        key={word.id}
+        word={word}
+        audioAvailable={audioAvailable}
+        onDone={handleIntroGotIt}
+      />
     );
   }
 
@@ -278,9 +246,31 @@ export default function Practice({ session, onFinish, audioAvailable = true }) {
       <div className="progress-bar">
         <div className="progress-fill" style={{ width: `${progressPct}%` }} />
       </div>
-      <p className="progress-text">
-        {currentGradedIndex + 1} / {totalGraded}
-      </p>
+      <div className="progress-row">
+        <p className="progress-text">
+          {currentGradedIndex + 1} / {totalGraded} · Attempt {attemptNo}
+        </p>
+        <div className="progress-actions">
+          {onSkip && (
+            <button
+              type="button"
+              className="restart-btn"
+              onClick={onSkip}
+              title="Leave this session"
+            >
+              Leave
+            </button>
+          )}
+          <button
+            type="button"
+            className="restart-btn"
+            onClick={handleRestart}
+            title="Restart this session from the beginning"
+          >
+            Restart
+          </button>
+        </div>
+      </div>
 
       {/* Question */}
       <div className="question-card">
@@ -302,7 +292,7 @@ export default function Practice({ session, onFinish, audioAvailable = true }) {
 
           {isCorrect && softNote && (
             <p className="soft-note">
-              ℹ️ {softNote}
+              {softNote}
             </p>
           )}
 
@@ -319,7 +309,7 @@ export default function Practice({ session, onFinish, audioAvailable = true }) {
             </div>
           )}
 
-          {!isCorrect && (
+          {!isCorrect && variant !== 'quiz' && (
             <p className="loop-message">
               You'll see this word again in this session, and again {getReencounterText()}.
             </p>
@@ -329,54 +319,58 @@ export default function Practice({ session, onFinish, audioAvailable = true }) {
             <strong className={playingId === `fb_${word.id}` ? 'highlight-text' : ''}>{label}</strong> — {word.en}
             <span className="inline-audio-actions">
               <button
-                className="speaker-btn feedback-speaker-btn slow-btn"
-                onClick={() => playAudio(`fb_${word.id}`, getSpokenText(word), 0.6)}
-                aria-label="Listen slowly"
+                type="button"
+                className="rate-btn"
+                onClick={() => playAudio(`fb_${word.id}`, getSpokenText(word), 0.5)}
+                aria-label="Listen at half speed"
                 disabled={!audioAvailable}
-                title="Listen slowly"
+                title="Listen at half speed"
               >
-                🐢
+                0.5x
               </button>
               <button
-                className="speaker-btn feedback-speaker-btn"
+                type="button"
+                className="listen-text-btn"
                 onClick={() => playAudio(`fb_${word.id}`, getSpokenText(word), 0.85)}
                 aria-label="Listen"
                 disabled={!audioAvailable}
                 title={audioAvailable ? 'Listen' : 'Audio not available on this device'}
               >
-                🔊
+                Listen
               </button>
             </span>
           </p>
           {word.note && (
-            <p className="feedback-note">ℹ️ {word.note}</p>
+            <p className="feedback-note">{word.note}</p>
           )}
           <p className="feedback-example">
             <em className={playingId === `fb_ex_${word.id}` ? 'highlight-text' : ''}>{word.example}</em>
             <span className="inline-audio-actions">
               <button
-                className="speaker-btn feedback-speaker-btn slow-btn"
-                onClick={() => playAudio(`fb_ex_${word.id}`, word.example, 0.6)}
-                aria-label="Listen slowly"
+                type="button"
+                className="rate-btn"
+                onClick={() => playAudio(`fb_ex_${word.id}`, word.example, 0.5)}
+                aria-label="Listen to example at half speed"
                 disabled={!audioAvailable}
-                title="Listen slowly"
+                title="Listen at half speed"
               >
-                🐢
+                0.5x
               </button>
               <button
-                className="speaker-btn feedback-speaker-btn"
+                type="button"
+                className="listen-text-btn"
                 onClick={() => playAudio(`fb_ex_${word.id}`, word.example, 0.85)}
                 aria-label="Listen to example sentence"
                 disabled={!audioAvailable}
                 title={audioAvailable ? 'Listen to example' : 'Audio not available on this device'}
               >
-                🔊
+                Listen
               </button>
             </span>
           </p>
           <p className="feedback-example-en">{word.exampleEn}</p>
 
-          {!isCorrect && (
+          {!isCorrect && variant !== 'quiz' && (
             <div className="explain-section">
               {!explanationData && (
                 <button
@@ -385,7 +379,7 @@ export default function Practice({ session, onFinish, audioAvailable = true }) {
                   onClick={handleExplain}
                   disabled={isExplaining}
                 >
-                  {isExplaining ? '⏳ Thinking…' : '💡 Explain Mistake'}
+                  {isExplaining ? 'Thinking…' : 'Explain Mistake'}
                 </button>
               )}
               {explanationData && (
@@ -413,6 +407,230 @@ export default function Practice({ session, onFinish, audioAvailable = true }) {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Full-screen new-word intro: only the word, centered, with letter-by-letter
+ * highlighting while it is spoken. The learner pronounces it; a match turns
+ * the screen green, a miss turns it red. Tracks the attempt count.
+ */
+function IntroFullScreen({ word, audioAvailable, onDone }) {
+  const [attempts, setAttempts] = useState(1);
+  const [checkState, setCheckState] = useState(null); // null | 'green' | 'red'
+  const [listening, setListening] = useState(false);
+  const [selfCheck, setSelfCheck] = useState(false);
+  const [heard, setHeard] = useState(null);
+  const { charIndex, play, stop } = useSpeechPlayback();
+  const recognitionRef = useRef(null);
+  const recognitionTimeoutRef = useRef(null);
+  const advanceTimerRef = useRef(null);
+  const replayTimerRef = useRef(null);
+
+  const spokenText = getSpokenText(word); // "der Bauch" or the sentence
+  const learnText = getSpokenTextForLearn(word); // string or array of parts
+
+  const sayWord = useCallback(
+    (rate) => {
+      play(`intro_${word.id}`, learnText, rate, 110);
+    },
+    [learnText, play, word.id]
+  );
+
+  function abortRecognition() {
+    if (recognitionTimeoutRef.current) {
+      clearTimeout(recognitionTimeoutRef.current);
+      recognitionTimeoutRef.current = null;
+    }
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.abort();
+      } catch {
+        /* ignore */
+      }
+      recognitionRef.current = null;
+    }
+  }
+
+  function clearTimers() {
+    if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+    if (replayTimerRef.current) clearTimeout(replayTimerRef.current);
+    advanceTimerRef.current = null;
+    replayTimerRef.current = null;
+  }
+
+  // Auto-play the word once on entry; clean everything up on exit
+  useEffect(() => {
+    const t = setTimeout(() => sayWord(0.8), 350);
+    const replay = replayTimerRef;
+    const adv = advanceTimerRef;
+    return () => {
+      clearTimeout(t);
+      clearTimers();
+      abortRecognition();
+      stop();
+      void replay;
+      void adv;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function handleVerdict(passed) {
+    abortRecognition();
+    setListening(false);
+    setSelfCheck(false);
+    setHeard(null);
+    if (passed) {
+      setCheckState('green');
+      playCorrectSound();
+      advanceTimerRef.current = setTimeout(() => {
+        onDone();
+      }, 1600);
+    } else {
+      setCheckState('red');
+      playIncorrectSound();
+      // Replay the word slowly so the learner can compare
+      replayTimerRef.current = setTimeout(() => sayWord(0.5), 700);
+    }
+  }
+
+  function tryRecognition() {
+    clearTimers();
+    setCheckState(null);
+    setHeard(null);
+    setAttempts((a) => a + 1);
+
+    const SR = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
+    if (!SR) {
+      // No microphone API: let the learner self-check
+      setSelfCheck(true);
+      return;
+    }
+    try {
+      const rec = new SR();
+      rec.lang = 'de-DE';
+      rec.interimResults = false;
+      rec.maxAlternatives = 3;
+      rec.onresult = (e) => {
+        const alts = [];
+        for (let i = 0; i < e.results[0].length; i++) {
+          alts.push(e.results[0][i].transcript);
+        }
+        setHeard(alts[0] || null);
+        const passed = alts.some((t) => isPronunciationMatch(t, spokenText));
+        handleVerdict(passed);
+      };
+      rec.onerror = () => {
+        setListening(false);
+        setSelfCheck(true);
+      };
+      rec.onend = () => setListening(false);
+      recognitionRef.current = rec;
+      setListening(true);
+      rec.start();
+      // Safety net: if no result/error arrives (e.g. missing mic), fall back
+      // to self-check after a few seconds.
+      recognitionTimeoutRef.current = setTimeout(() => {
+        if (recognitionRef.current === rec) {
+          abortRecognition();
+          setListening(false);
+          setSelfCheck(true);
+        }
+      }, 6000);
+    } catch {
+      setListening(false);
+      setSelfCheck(true);
+    }
+  }
+
+  function skip() {
+    clearTimers();
+    abortRecognition();
+    stop();
+    onDone();
+  }
+
+  const stateClass =
+    checkState === 'green'
+      ? ' intro-fullscreen--green'
+      : checkState === 'red'
+        ? ' intro-fullscreen--red'
+        : '';
+
+  return (
+    <div className={`intro-fullscreen${stateClass}`} role="region" aria-label={`New word: ${spokenText}`}>
+      <div className="intro-fs-top">
+        <span className="intro-fs-badge">New Word</span>
+        <span className="intro-fs-attempts">Attempt {attempts}</span>
+      </div>
+
+      <div className="intro-fs-center">
+        <h2 className="intro-fs-word" aria-label={spokenText}>
+          {renderSpokenText(learnText, charIndex)}
+        </h2>
+        <p className="intro-fs-hint">
+          {checkState === 'green'
+            ? 'Pronounced correctly!'
+            : checkState === 'red'
+              ? heard
+                ? `Heard: "${heard}" — try again`
+                : 'Not quite — listen and try again'
+              : listening
+                ? 'Listening… say the word now'
+                : 'Listen, then say the word aloud'}
+        </p>
+      </div>
+
+      <div className="intro-fs-actions">
+        {checkState !== 'green' && (
+          <>
+            {audioAvailable && (
+              <>
+                <button
+                  type="button"
+                  className="rate-btn"
+                  onClick={() => sayWord(0.5)}
+                  title="Listen at half speed"
+                >
+                  0.5x
+                </button>
+                <button
+                  type="button"
+                  className="listen-text-btn"
+                  onClick={() => sayWord(0.85)}
+                  title="Listen"
+                >
+                  Listen
+                </button>
+              </>
+            )}
+            {!selfCheck && !listening && (
+              <button type="button" className="btn primary-btn" onClick={tryRecognition}>
+                Say it
+              </button>
+            )}
+            {selfCheck && (
+              <>
+                <button type="button" className="btn primary-btn" onClick={() => handleVerdict(true)}>
+                  I said it correctly
+                </button>
+                <button type="button" className="btn secondary-btn" onClick={() => handleVerdict(false)}>
+                  Not correct yet
+                </button>
+              </>
+            )}
+          </>
+        )}
+        {checkState === 'green' && (
+          <button type="button" className="btn primary-btn" onClick={skip}>
+            Continue
+          </button>
+        )}
+        <button type="button" className="intro-fs-skip" onClick={skip}>
+          {checkState === 'green' ? '' : 'Skip →'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -501,21 +719,24 @@ function renderQuestion(
             </span>
             <span className="inline-audio-actions">
               <button
-                className="speaker-btn slow-btn"
-                onClick={() => playAudio(`q_mcq_${word.id}`, getSpokenText(word), 0.6)}
-                aria-label="Listen slowly"
+                type="button"
+                className="rate-btn"
+                onClick={() => playAudio(`q_mcq_${word.id}`, getSpokenText(word), 0.5)}
+                aria-label="Listen at half speed"
                 disabled={!audioAvailable}
+                title="Listen at half speed"
               >
-                🐢
+                0.5x
               </button>
               <button
-                className="speaker-btn"
+                type="button"
+                className="listen-text-btn"
                 onClick={() => playAudio(`q_mcq_${word.id}`, getSpokenText(word), 0.85)}
                 aria-label="Listen"
                 disabled={!audioAvailable}
                 title={audioAvailable ? 'Listen' : 'Audio not available on this device'}
               >
-                🔊
+                Listen
               </button>
             </span>
           </p>
@@ -542,21 +763,24 @@ function renderQuestion(
             ___ <span className={playingId === `q_art_${word.id}` ? 'highlight-text' : ''}>{word.de} {word.plural ? '(Pl.)' : ''}</span>
             <span className="inline-audio-actions">
               <button
-                className="speaker-btn slow-btn"
-                onClick={() => playAudio(`q_art_${word.id}`, `${word.article} ${word.de}`, 0.6)}
-                aria-label="Listen slowly"
+                type="button"
+                className="rate-btn"
+                onClick={() => playAudio(`q_art_${word.id}`, `${word.article} ${word.de}`, 0.5)}
+                aria-label="Listen at half speed"
                 disabled={!audioAvailable}
+                title="Listen at half speed"
               >
-                🐢
+                0.5x
               </button>
               <button
-                className="speaker-btn"
+                type="button"
+                className="listen-text-btn"
                 onClick={() => playAudio(`q_art_${word.id}`, `${word.article} ${word.de}`, 0.85)}
                 aria-label="Listen"
                 disabled={!audioAvailable}
                 title={audioAvailable ? 'Listen' : 'Audio not available on this device'}
               >
-                🔊
+                Listen
               </button>
             </span>
           </p>
@@ -581,21 +805,24 @@ function renderQuestion(
           <p className="question-label">Listen and pick the meaning</p>
           <div className="audio-actions" style={{ justifyContent: 'center', marginBottom: 16 }}>
             <button
-              className="listen-play-btn slow-btn"
-              onClick={() => playAudio(`q_lis_${word.id}`, getSpokenText(word), 0.6)}
-              aria-label="Play slowly"
+              type="button"
+              className="rate-btn"
+              onClick={() => playAudio(`q_lis_${word.id}`, getSpokenText(word), 0.5)}
+              aria-label="Play at half speed"
               disabled={!audioAvailable}
+              title="Play at half speed"
             >
-              🐢
+              0.5x
             </button>
             <button
-              className="listen-play-btn"
+              type="button"
+              className="listen-text-btn"
               onClick={() => playAudio(`q_lis_${word.id}`, getSpokenText(word), 0.85)}
               aria-label="Play audio"
               disabled={!audioAvailable}
               title={audioAvailable ? 'Play audio' : 'Audio not available on this device'}
             >
-              🔊 Play
+              Play
             </button>
           </div>
           <div className="options">
@@ -621,21 +848,24 @@ function renderQuestion(
             <span className={playingId === `q_clz_${word.id}` ? 'highlight-text' : ''}>{exercise.sentence}</span>
             <span className="inline-audio-actions">
               <button
-                className="speaker-btn slow-btn"
-                onClick={() => playAudio(`q_clz_${word.id}`, word.example, 0.6)}
-                aria-label="Listen slowly"
+                type="button"
+                className="rate-btn"
+                onClick={() => playAudio(`q_clz_${word.id}`, word.example, 0.5)}
+                aria-label="Listen at half speed"
                 disabled={!audioAvailable}
+                title="Listen at half speed"
               >
-                🐢
+                0.5x
               </button>
               <button
-                className="speaker-btn"
+                type="button"
+                className="listen-text-btn"
                 onClick={() => playAudio(`q_clz_${word.id}`, word.example, 0.85)}
                 aria-label="Listen"
                 disabled={!audioAvailable}
                 title={audioAvailable ? 'Listen' : 'Audio not available on this device'}
               >
-                🔊
+                Listen
               </button>
             </span>
           </p>
@@ -657,26 +887,29 @@ function renderQuestion(
     case 'typing':
       return (
         <>
-          <p className="question-label">Type the German word</p>
+          <p className="question-label">Type this in German</p>
           <p className="question-en">
             {word.en}
             <span className="inline-audio-actions">
               <button
-                className="speaker-btn slow-btn"
-                onClick={() => playAudio(`q_typ_${word.id}`, getSpokenText(word), 0.6)}
-                aria-label="Listen slowly"
+                type="button"
+                className="rate-btn"
+                onClick={() => playAudio(`q_typ_${word.id}`, getSpokenText(word), 0.5)}
+                aria-label="Listen at half speed"
                 disabled={!audioAvailable}
+                title="Listen at half speed"
               >
-                🐢
+                0.5x
               </button>
               <button
-                className="speaker-btn"
+                type="button"
+                className="listen-text-btn"
                 onClick={() => playAudio(`q_typ_${word.id}`, getSpokenText(word), 0.85)}
                 aria-label="Listen"
                 disabled={!audioAvailable}
                 title={audioAvailable ? 'Listen' : 'Audio not available on this device'}
               >
-                🔊
+                Listen
               </button>
             </span>
           </p>
@@ -686,7 +919,7 @@ function renderQuestion(
               className="typing-input"
               value={typed}
               onChange={(e) => setTyped(e.target.value)}
-              placeholder="Type in German…"
+              placeholder="Type the German word…"
               autoFocus
               disabled={answered}
             />
@@ -708,21 +941,24 @@ function renderQuestion(
             {word.en}
             <span className="inline-audio-actions">
               <button
-                className="speaker-btn slow-btn"
-                onClick={() => playAudio(`q_snt_${word.id}`, word.de, 0.6)}
-                aria-label="Listen slowly"
+                type="button"
+                className="rate-btn"
+                onClick={() => playAudio(`q_snt_${word.id}`, word.de, 0.5)}
+                aria-label="Listen at half speed"
                 disabled={!audioAvailable}
+                title="Listen at half speed"
               >
-                🐢
+                0.5x
               </button>
               <button
-                className="speaker-btn"
+                type="button"
+                className="listen-text-btn"
                 onClick={() => playAudio(`q_snt_${word.id}`, word.de, 0.85)}
                 aria-label="Listen"
                 disabled={!audioAvailable}
                 title={audioAvailable ? 'Listen' : 'Audio not available on this device'}
               >
-                🔊
+                Listen
               </button>
             </span>
           </p>
@@ -760,3 +996,8 @@ function optionClass(option, correct, selected, answered) {
   if (option === selected) return 'option-wrong';
   return '';
 }
+
+// Shared with the shell's quiz variants (Daily Challenges, Test):
+// they reuse the exact same exercise renderers, only the loop differs.
+export { renderQuestion };
+

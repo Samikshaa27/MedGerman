@@ -143,9 +143,12 @@ export function speak(text, options = {}) {
   
   window.speechSynthesis.cancel();
   
-  if (!text) return null;
+  if (!text) {
+    if (options.onend) options.onend();
+    return null;
+  }
 
-  const { rate = 0.85, onstart, onend } = options;
+  const { rate = 0.85, onstart, onend, onboundary } = options;
   const voice = getBestGermanVoice();
 
   // Handle compound word parts as sequential utterances
@@ -166,6 +169,19 @@ export function speak(text, options = {}) {
       
       if (currentIndex === 0 && onstart) {
         utterance.onstart = onstart;
+      }
+      if (onboundary) {
+        utterance.onboundary = (event) => {
+          // Offset charIndex so it addresses the joined string
+          let base = 0;
+          for (let i = 0; i < currentIndex; i++) {
+            base += text[i].length + 1;
+          }
+          onboundary({
+            charIndex: base + (event.charIndex || 0),
+            charLength: event.charLength || 0,
+          });
+        };
       }
       
       utterance.onend = () => {
@@ -193,6 +209,10 @@ export function speak(text, options = {}) {
     
     if (onstart) utterance.onstart = onstart;
     if (onend) utterance.onend = onend;
+    if (onboundary) {
+      utterance.onboundary = (event) =>
+        onboundary({ charIndex: event.charIndex || 0, charLength: event.charLength || 0 });
+    }
 
     window.speechSynthesis.speak(utterance);
     return utterance;
@@ -200,4 +220,84 @@ export function speak(text, options = {}) {
     if (onend) onend();
     return null;
   }
+}
+
+/**
+ * Timed letter-by-letter highlight fallback for browsers/voices that never
+ * fire boundary events. Yields charIndex positions across `text` at a pace
+ * derived from msPerChar, scaled by the speech rate (slower rate = longer
+ * per character).
+ *
+ * Returns a cancel function; the caller can cancel the emulation once real
+ * boundary events start arriving.
+ *
+ * @param {string} text
+ * @param {(charIndex: number) => void} onChar
+ * @param {() => void} onDone
+ * @param {number} msPerChar baseline ms per character at rate 1.0
+ * @param {number} rate speech rate (lower = slower speech = longer per char)
+ */
+export function startTimedHighlight(text, onChar, onDone, msPerChar = 85, rate = 0.85) {
+  if (typeof window === 'undefined') return () => {};
+  const step = Math.max(25, msPerChar / Math.max(0.25, rate));
+  let i = 0;
+  let timer = null;
+
+  const tick = () => {
+    if (i >= text.length) {
+      if (onDone) onDone();
+      return;
+    }
+    if (onChar) onChar(i);
+    i++;
+    timer = setTimeout(tick, step);
+  };
+  timer = setTimeout(tick, step);
+
+  return function cancel() {
+    if (timer) clearTimeout(timer);
+    timer = null;
+  };
+}
+
+/**
+ * Loose comparison of what the learner said with the expected German text.
+ * Uses the same umlaut folding as the typing exercises plus de-accenting of
+ * the recognised transcript, so recognition hiccups on umlauts do not punish
+ * the learner. Collapses duplicated adjacent words to tolerate stray article
+ * echoes from the recogniser.
+ *
+ * @returns {boolean}
+ */
+export function isPronunciationMatch(recognised, expected) {
+  if (!recognised || !expected) return false;
+
+  const stripAccents = (s) =>
+    s
+      .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+      .replace(/á|à|â/g, 'a')
+      .replace(/é|è|ê/g, 'e')
+      .replace(/í|ì|î/g, 'i')
+      .replace(/ó|ò|ô/g, 'o')
+      .replace(/ú|ù|û/g, 'u');
+
+  const norm = (s) =>
+    stripAccents(String(s))
+      .trim()
+      .toLowerCase()
+      .replace(/[.,!?;:]+/g, '')
+      .replace(/\s+/g, ' ');
+
+  const a = norm(recognised);
+  const b = norm(expected);
+
+  if (a === b) return true;
+
+  // Tolerate a stray repeated word from the recogniser ("der der Bauch")
+  const collapsed = a
+    .split(' ')
+    .filter((w, idx, arr) => idx === 0 || w !== arr[idx - 1])
+    .join(' ');
+
+  return collapsed === b;
 }

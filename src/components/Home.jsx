@@ -1,7 +1,15 @@
 import { useState } from 'react';
 import words from '../data/words.json';
 import { isDue, isDevMode, computeStages } from '../lib/srs.js';
-import { loadProgress, loadStreak, loadXP, calculateLevel, resetProgress } from '../lib/storage.js';
+import {
+  loadProgress,
+  loadStreak,
+  loadXP,
+  loadDailyXP,
+  DAILY_XP_GOAL,
+  calculateLevel,
+  resetProgress,
+} from '../lib/storage.js';
 
 /**
  * Home dashboard.
@@ -9,14 +17,23 @@ import { loadProgress, loadStreak, loadXP, calculateLevel, resetProgress } from 
  *   onLearn    – navigate to Learn screen
  *   onPractice – start a "practice" session
  *   onReview   – start a "review" session
+ *   masteryOnly – side-nav Mastery screen: word-mastery overview only
+ *                 (stats bar + stacked bar + weakest words, no actions/goal ring)
  */
-export default function Home({ onLearn, onPractice, onReview }) {
+export default function Home({ onLearn, onPractice, onReview, masteryOnly = false }) {
   const [, setTick] = useState(0);
   const progress = loadProgress();
   const { streak, lastDate } = loadStreak();
   const xp = loadXP();
   const levelInfo = calculateLevel(xp);
   const dev = isDevMode();
+
+  // Daily goal ring
+  const daily = loadDailyXP();
+  const dailyPct = Math.min(100, Math.round((daily.xp / DAILY_XP_GOAL) * 100));
+  const dailyDone = daily.xp >= DAILY_XP_GOAL;
+  const ringCircumference = 2 * Math.PI * 15.9155;
+  const ringOffset = ringCircumference * (1 - dailyPct / 100);
 
   // Compute beginner-friendly mastery stages
   const stages = computeStages(words, progress);
@@ -93,13 +110,11 @@ export default function Home({ onLearn, onPractice, onReview }) {
       {/* Top Learner Stats: Streak & Level */}
       <div className="home-stats-bar">
         <div className="home-streak">
-          <span className="streak-fire">🔥</span>
           <span className="streak-count">{streak}</span>
           <span className="streak-label">day streak</span>
         </div>
         <div className="home-level-badge">
           <div className="level-badge-pill">
-            <span className="level-star">⭐</span>
             <span className="level-num">Lvl {levelInfo.level}</span>
           </div>
           <span className="level-xp-text">{xp} XP</span>
@@ -114,10 +129,36 @@ export default function Home({ onLearn, onPractice, onReview }) {
         <span className="level-subtext">{levelInfo.title} • {levelInfo.currentXPInLevel}/{levelInfo.levelThreshold} XP</span>
       </div>
 
+      {/* Daily Goal Ring */}
+      {!masteryOnly && (
+      <div
+        className="daily-goal-card"
+        role="status"
+        aria-label={`Daily goal: ${daily.xp} of ${DAILY_XP_GOAL} XP`}
+      >
+        <svg className="daily-goal-ring" viewBox="0 0 36 36" aria-hidden="true">
+          <path
+            className="daily-goal-ring-bg"
+            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+          />
+          <path
+            className="daily-goal-ring-fill"
+            strokeDasharray={`${dailyPct} 100`}
+            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+          />
+        </svg>
+        <div className="daily-goal-text">
+          <p className="daily-goal-title">{dailyDone ? 'Daily goal reached!' : "Today's goal"}</p>
+          <p className="daily-goal-sub">
+            {daily.xp} / {DAILY_XP_GOAL} XP{dailyDone ? '' : ` — ${DAILY_XP_GOAL - daily.xp} XP to go`}
+          </p>
+        </div>
+      </div>
+      )}
+
       {/* Streak Expiry Warning Banner */}
-      {showStreakWarning && (
+      {!masteryOnly && showStreakWarning && (
         <div className="streak-warning-banner">
-          <span className="streak-warning-icon">⏳</span>
           <p className="streak-warning-text">
             Your streak ends in {hoursLeft}h — practice now!
           </p>
@@ -125,7 +166,7 @@ export default function Home({ onLearn, onPractice, onReview }) {
       )}
 
       {/* Day-0: Learner has never practised */}
-      {seenCount === 0 ? (
+      {!masteryOnly && (seenCount === 0 ? (
         <div className="home-day0-card">
           <p className="day0-subtext">Start with 5 words. It takes about 3 minutes.</p>
           <button className="btn primary-btn day0-start-btn" onClick={onPractice}>
@@ -177,7 +218,7 @@ export default function Home({ onLearn, onPractice, onReview }) {
             )}
           </div>
         </>
-      )}
+      ))}
 
       {/* Beginner-friendly Word Mastery Overview */}
       <div className="home-section mastery-section">
@@ -274,7 +315,7 @@ export default function Home({ onLearn, onPractice, onReview }) {
       {/* Dev-only controls */}
       {dev && (
         <div className="home-dev-panel">
-          <p className="dev-tag">⚡ DEV MODE: intervals in minutes [0, 1, 2, 3, 5, 8]</p>
+          <p className="dev-tag">DEV MODE: intervals in minutes [0, 1, 2, 3, 5, 8]</p>
           <button className="btn dev-reset-btn" onClick={handleReset}>
             Reset progress
           </button>

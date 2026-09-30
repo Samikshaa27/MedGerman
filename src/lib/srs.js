@@ -15,13 +15,35 @@ export function isDevMode() {
 }
 
 /**
+ * Compute the updated wrongByType map after an attempt.
+ * Used by the adaptive exercise selector to bias future exercises toward
+ * the types the learner gets wrong most.
+ * @returns {object} the updated wrongByType map (not a full progress object)
+ */
+export function recordTypeResult(progress, exerciseType, correct) {
+  const wrongByType = { ...(progress.wrongByType || {}) };
+  if (!correct && exerciseType) {
+    wrongByType[exerciseType] = (wrongByType[exerciseType] || 0) + 1;
+  }
+  return wrongByType;
+}
+
+/**
  * Grade a word after an answer.
  * Correct: promote to next box (max 5), set due date.
  * Wrong: demote to box 0, due immediately, increment wrong count.
  * Always increments seen count.
+ *
+ * @param {object} progress - may include wrongByType stats (preserved across grades)
+ * @param {boolean} correct
+ * @param {string} [exerciseType] - optional; enables per-type wrong tracking
  */
-export function grade(progress, correct) {
+export function grade(progress, correct, exerciseType = null) {
   const now = Date.now();
+  const tracksTypes = Boolean(exerciseType || progress.wrongByType);
+  const wrongByType = tracksTypes
+    ? recordTypeResult(progress, exerciseType, correct)
+    : null;
   if (correct) {
     const newBox = Math.min(progress.box + 1, MAX_BOX);
     const intervalMs = isDevMode()
@@ -32,6 +54,7 @@ export function grade(progress, correct) {
       due: now + intervalMs,
       seen: progress.seen + 1,
       wrong: progress.wrong,
+      ...(wrongByType ? { wrongByType } : {}),
     };
   } else {
     return {
@@ -39,6 +62,7 @@ export function grade(progress, correct) {
       due: now,
       seen: progress.seen + 1,
       wrong: progress.wrong + 1,
+      ...(wrongByType ? { wrongByType } : {}),
     };
   }
 }

@@ -1,0 +1,95 @@
+{
+  "test": {
+    "mode": "total",
+    "questionCount": 10,
+    "secondsByLevel": {
+      "1": 240,
+      "2": 210,
+      "3": 180,
+      "4": 150,
+      "5": 135,
+      "6": 120,
+      "7": 100,
+      "8": 90,
+      "9": 80
+    },
+    "fallbackSeconds": 180
+  },
+  "levels": [
+    {
+      "id": "L1",
+      "title": "Body Basics",
+      "subtitle": "Head to toe — your first 12 words",
+      "kind": "words",
+      "stretch": false,
+      "wordIds": ["kopf", "arm", "bein", "hand", "fuss", "bauch", "ruecken", "brust", "herz", "lunge", "auge", "mund"]
+    },
+    {
+      "id": "L2",
+      "title": "Body & Symptoms",
+      "subtitle": "Five more body parts, then how patients feel",
+      "kind": "words",
+      "stretch": false,
+      "wordIds": ["ohr", "nase", "hals", "finger", "knie", "schmerz", "fieber", "husten", "uebelkeit", "durchfall", "kopfschmerzen", "blutdruck"]
+    },
+    {
+      "id": "L3",
+      "title": "Symptoms & Supplies",
+      "subtitle": "Wounds, allergies and the first supplies",
+      "kind": "words",
+      "stretch": false,
+      "wordIds": ["wunde", "allergie", "erkaeltung", "schwindel", "erbrechen", "ausschlag", "atemnot", "tablette", "spritze", "verband"]
+    },
+    {
+      "id": "L4",
+      "title": "Ward & People",
+      "subtitle": "Medication, people and places on the ward",
+      "kind": "words",
+      "stretch": false,
+      "wordIds": ["medikament", "rezept", "krankenhaus", "arzt", "krankenschwester", "patient", "bett", "pflaster", "thermometer", "rollstuhl", "klingel", "station"]
+    },
+    {
+      "id": "L5",
+      "title": "Places & First Sentences",
+      "subtitle": "Four hospital places, then speak in full sentences",
+      "kind": "mixed",
+      "stretch": false,
+      "wordIds": ["zimmer", "notaufnahme", "wartezimmer", "aufnahme", "kopfschmerzen_stark", "blutdruck_messen", "tablette_essen", "allergien_fragen", "verband_wechseln", "wo_weh_tut"]
+    },
+    {
+      "id": "L6",
+      "title": "Everyday Sentences",
+      "subtitle": "Nine phrases you will use on every shift",
+      "kind": "sentences",
+      "stretch": false,
+      "wordIds": ["wasser_trinken", "blutprobe_brauchen", "skala_schmerzen", "temperatur_messen", "gut_geschlafen", "klingel_druecken", "vorsichtig_aufstehen", "hilfe_waschen", "tief_atmen"]
+    },
+    {
+      "id": "L7",
+      "title": "B1 Handover Sentences",
+      "subtitle": "Longer clinical sentences — unlock via A1 familiarity",
+      "kind": "sentences",
+      "stretch": false,
+      "b1Gated": true,
+      "wordIds": ["b1_uebergabe", "b1_medikamentenplan", "b1_anamnese", "b1_visite", "b1_bilanzierung", "b1_infusion", "b1_unvertraeglichkeit"]
+    },
+    {
+      "id": "L8",
+      "title": "Stretch: Ward Handover Dialogue",
+      "subtitle": "Coming soon",
+      "kind": "stretch",
+      "stretch": true,
+      "comingSoon": true,
+      "plannedContent": "A short evening-shift handover dialogue (2-3 speakers, ~6-8 turns) covering: a patient complaint, vital-signs status, medication changes and tasks for the next shift — followed by comprehension questions. No German text until approved."
+    },
+    {
+      "id": "L9",
+      "title": "Stretch: Patient Admission Paragraph",
+      "subtitle": "Coming soon",
+      "kind": "stretch",
+      "stretch": true,
+      "comingSoon": true,
+      "plannedContent": "A short admission-interview paragraph combining the allergy question, the pain-scale assessment and breathing instructions, with recall questions afterwards. No German text until approved."
+    }
+  ]
+}

@@ -6,6 +6,7 @@ import {
   isMastered,
   getReencounterText,
   computeStages,
+  recordTypeResult,
   INTERVALS,
   DEV_INTERVALS,
   MAX_BOX,
@@ -192,6 +193,40 @@ console.log('Testing SRS logic (srs.test.js)...\n');
     assert.equal(sum, words.length, `Random run ${run} stages must sum to words.length`);
     assert.equal(randStages.total, words.length, `Random run ${run} total matches word count`);
   }
+}
+
+// Per-exercise-type stats (adaptive selection data)
+{
+  // recordTypeResult returns the wrongByType map; only wrong answers increment
+  const base = { box: 1, due: 0, seen: 1, wrong: 0 };
+  const afterCorrect = recordTypeResult(base, 'mcq', true);
+  assert.deepEqual(afterCorrect, {}, 'Correct answers do not add type wrongs');
+  const afterWrong = recordTypeResult(base, 'article', false);
+  assert.deepEqual(afterWrong, { article: 1 }, 'Wrong answers increment the type counter');
+  const afterTwoWrong = recordTypeResult({ ...base, wrongByType: afterWrong }, 'article', false);
+  assert.deepEqual(afterTwoWrong, { article: 2 }, 'Same-type wrongs accumulate');
+
+  // grade() preserves and extends wrongByType across promotions and demotions
+  const withStats = { ...base, wrongByType: { article: 2 } };
+  const gradedCorrect = grade(withStats, true, 'mcq');
+  assert.deepEqual(
+    gradedCorrect.wrongByType,
+    { article: 2 },
+    'Correct grade preserves existing type stats'
+  );
+  assert.equal(gradedCorrect.box, 2, 'Promotion still applies from box 1');
+
+  const gradedWrong = grade(gradedCorrect, false, 'mcq');
+  assert.deepEqual(
+    gradedWrong.wrongByType,
+    { article: 2, mcq: 1 },
+    'Wrong grade adds the new type wrong and keeps old ones'
+  );
+  assert.equal(gradedWrong.box, 0, 'Demotion still applies');
+
+  // grade() without an exerciseType still preserves prior stats
+  const gradedNoType = grade(gradedWrong, true);
+  assert.deepEqual(gradedNoType.wrongByType, { article: 2, mcq: 1 }, 'Stats survive type-less grades');
 }
 
 console.log('✓ ALL SRS UNIT TESTS PASSED SUCCESSFULLY!\n');
